@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "SECAF Helper",
-  "description": "Calcula horas presenciais no sistema SECAF",
+  "name": "SECAF-PRO",
+  "description": "Calcula horas presenciais no sistema SECAF (IBGE). Não oficial.",
   "version": "1.0.1",
   "action": {
     "default_icon": {
@@ -9,14 +9,11 @@
       "48": "images/icon48.png",
       "128": "images/icon128.png"
     },
-    "default_title": "SECAF Helper"
+    "default_title": "SECAF-PRO"
   },
   "permissions": [
     "activeTab",
     "scripting"
-  ],
-  "host_permissions": [
-    "*://*.ibge.gov.br/*"
   ],
   "background": {
     "service_worker": "background.js"
