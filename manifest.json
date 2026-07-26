@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "SECAF-PRO",
   "description": "Calcula horas presenciais no sistema SECAF (IBGE). Não oficial.",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "action": {
     "default_icon": {
       "16": "images/icon16.png",
