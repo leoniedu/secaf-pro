@@ -1,0 +1,46 @@
+#!/bin/sh
+# Bumps the manifest.json patch version on every push of the current branch.
+# Commits the bump, re-runs the push so the bump is included, then cancels
+# the original push (which would not contain the bump commit).
+
+[ -n "$SECAF_SKIP_BUMP" ] && exit 0
+
+remote="$1"
+current_branch=$(git symbolic-ref --quiet --short HEAD) || exit 0
+
+bump_needed=0
+zero_sha="0000000000000000000000000000000000000000"
+while read -r local_ref local_sha remote_ref remote_sha; do
+  if [ "$local_ref" = "refs/heads/$current_branch" ] && [ "$local_sha" != "$zero_sha" ]; then
+    bump_needed=1
+  fi
+done
+
+[ "$bump_needed" = "1" ] || exit 0
+
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+new_version=$(python3 <<'EOF'
+import json
+path = "manifest.json"
+with open(path) as f:
+    manifest = json.load(f)
+parts = manifest["version"].split(".")
+while len(parts) < 3:
+    parts.append("0")
+parts[-1] = str(int(parts[-1]) + 1)
+manifest["version"] = ".".join(parts)
+with open(path, "w") as f:
+    json.dump(manifest, f, indent=2, ensure_ascii=False)
+    f.write("\n")
+print(manifest["version"])
+EOF
+) || exit 1
+
+git add manifest.json
+git commit --quiet --no-verify -m "chore: bump version to $new_version"
+echo "pre-push: manifest version bumped to $new_version; re-pushing with the bump included"
+if SECAF_SKIP_BUMP=1 git push --quiet "$remote" "$current_branch"; then
+  echo "pre-push: push with version $new_version succeeded; the 'failed to push' message below is only the original (superseded) push"
+fi
+exit 1
