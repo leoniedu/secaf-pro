@@ -1,4 +1,4 @@
-# SECAF Helper - Extensão para Chrome
+# SECAF-PRO - Extensão para Chrome
 
 Esta extensão para Chrome permite calcular horas presenciais no sistema SECAF do IBGE, com base nas regras do PGD 2.0.
 
@@ -14,26 +14,22 @@ Para instalar a extensão, siga estes passos:
 
 ## Uso
 
-1. Acesse o sistema SECAF do IBGE
+1. Acesse o sistema SECAF do IBGE e abra a apuração do mês desejado
 2. Clique no ícone da extensão na barra de ferramentas
-3. A extensão irá calcular automaticamente as horas presenciais com base nos dados da página
-4. Siga as instruções na tela para informar horas presenciais obrigatórias, dias de férias, etc.
-5. Um relatório será exibido com o cálculo das horas presenciais
-
-## Personalização dos Ícones
-
-Os ícones incluídos são apenas placeholders. Para personalizar:
-
-1. Substitua os arquivos na pasta `images` por seus próprios ícones
-2. Mantenha os mesmos nomes de arquivo e dimensões (16x16, 48x48, 128x128 pixels)
+3. Informe as horas presenciais obrigatórias por mês (a extensão sugere o valor detectado nos dias de férias e feriados, ajuste apenas se houver férias futuras ainda não registradas no SECAF)
+4. Confirme se deseja incluir a data de hoje no cálculo
+5. Um relatório é exibido com as horas devidas, as horas trabalhadas, o saldo do mês e o saldo diário necessário nos dias úteis restantes
 
 ## Recursos
 
 - Cálculo automático de horas presenciais baseado nas regras do PGD 2.0 do IBGE
-- Detecção automática de feriados e pontos facultativos
+- Detecção automática de feriados e pontos facultativos a partir dos dias úteis do mês
+- Detecção automática dos dias de férias já registrados na apuração do mês (com ajuste manual para férias futuras ainda não lançadas no SECAF)
+- Cruzamento automático entre a lista de feriados e os dias de férias, para não descontar duas vezes um feriado que cai durante as férias
+- Opção de incluir ou não o dia de hoje no cálculo
 - Exibição de resultados em formato de horas e minutos (ex: 8h30min) para melhor legibilidade
+- Todo o processamento é local — nenhum dado sai do seu navegador
 - Compatível com o sistema SECAF do IBGE
-- Interface simples e intuitiva
 
 ## Detalhes Técnicos
 
@@ -59,10 +55,6 @@ Para contribuir com o desenvolvimento desta extensão:
 
 Este projeto está licenciado sob a licença MIT - veja o arquivo LICENSE para detalhes.
 
-## Autor
-
-Desenvolvido como parte do pacote ibgeba_utils.
-
 ## Observações
 
-Esta extensão foi desenvolvida como parte do pacote ibgeba_utils e funciona apenas no sistema SECAF do IBGE.
+Esta é uma extensão não oficial e funciona apenas no sistema SECAF do IBGE.
