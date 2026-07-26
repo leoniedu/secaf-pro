@@ -47,32 +47,40 @@ function secaf() {
   });
 
   // Autodetect vacation days reported in the table (e.g. "0221 Férias"),
-  // keeping track of which day-of-month each vacation row falls on
-  const diasDeFeriasDetectados = [];
+  // keeping track of which day-of-month each vacation row falls on.
+  // Deduplicated defensively in case a row is matched more than once.
+  const diasDeFeriasDetectadosSet = new Set();
   linhas.forEach((linha, indice) => {
     if (linha.textContent.toLowerCase().includes("férias")) {
       const matchDia = diasCelulaData[indice].match(/^(\d{1,2})/);
-      if (matchDia) diasDeFeriasDetectados.push(parseInt(matchDia[1]));
+      if (matchDia) diasDeFeriasDetectadosSet.add(parseInt(matchDia[1]));
     }
   });
+  const diasDeFeriasDetectados = Array.from(diasDeFeriasDetectadosSet).sort((a, b) => a - b);
   console.log(`Dias de férias detectados na tabela: ${diasDeFeriasDetectados.join(", ") || "nenhum"}`);
 
   // Read the holiday list (day + description) from the sidebar, if present.
-  // Some pontos facultativos are afternoon-only (e.g. "após as 13 horas"):
-  // SECAF's diasUteis still credits these as a full day off, but only half
-  // the working day is actually free, so they're tracked separately to
-  // deduct 4h instead of 8h.
-  const diasFeriados = [];
-  const diasFeriadosParciais = new Set();
+  // Weekend holidays/pontos facultativos are dropped: they don't free up a
+  // workday, since diasSegundaASexta and the whole calculation only count
+  // Mon-Fri. Some pontos facultativos are afternoon-only (e.g. "após as 13
+  // horas"): SECAF's diasUteis still credits these as a full day off, but
+  // only half the working day is actually free, so they're tracked
+  // separately to deduct 4h instead of 8h.
+  // Deduplicated with a Set: the page can render the holiday widget more
+  // than once (e.g. a hidden template alongside the visible one), which
+  // would otherwise double-count every scraped day.
+  const diasFeriadosSet0 = new Set();
+  let diasFeriadosParciais = new Set();
   document.querySelectorAll(".holidays__number").forEach((elementoDia) => {
     const dia = parseInt(elementoDia.textContent.trim());
-    if (isNaN(dia)) return;
-    diasFeriados.push(dia);
+    if (isNaN(dia) || !ehDiaUtil(ano, mes, dia)) return;
+    diasFeriadosSet0.add(dia);
     const textoDescricao = elementoDia.parentElement?.querySelector(".holidays__text")?.textContent || "";
     if (/após\s+as\s+\d{1,2}\s*horas/i.test(textoDescricao)) {
       diasFeriadosParciais.add(dia);
     }
   });
+  const diasFeriados = Array.from(diasFeriadosSet0).sort((a, b) => a - b);
   console.log(`Feriados listados na página: ${diasFeriados.join(", ") || "nenhum"}`);
   console.log(`Feriados parciais (meio período): ${Array.from(diasFeriadosParciais).join(", ") || "nenhum"}`);
 
@@ -80,80 +88,85 @@ function secaf() {
   const horasPresencial = pedirNumero("Número de horas presenciais obrigatórias por mês:", "64");
   if (horasPresencial === null) return;
 
-  // Confirm the vacation days detected in the apuração table, same pattern
-  // as the holiday confirmation below: show what was found and let the
-  // user override with the day-spec format if the table is wrong/incomplete.
-  let diasDeFeriasRegistrados = diasDeFeriasDetectados;
+  // Confirm the vacation days detected in the apuração table (shown
+  // summarized as ranges, e.g. "1-3,10"), same pattern as the holiday
+  // confirmation below: show what was found and let the user correct the
+  // full list — including days SECAF hasn't registered yet — with the same
+  // day-spec format.
+  let diasDeFerias = diasDeFeriasDetectados;
   if (diasDeFeriasDetectados.length > 0) {
     const usarFeriasDetectadas = confirm(
       `Foram detectados os seguintes dias de férias na apuração: ${formatarDiasDoMes(diasDeFeriasDetectados)}.\nDeseja usar estes dias?\nClique em OK para usar os dias detectados ou em Cancelar para informar manualmente.`
     );
     if (!usarFeriasDetectadas) {
       const feriasManualTexto = prompt(
-        "Dias (números) de férias já registrados no mês, ex: 10-20:",
+        "Dias (números) de férias no mês, ex: 10-20:",
         formatarDiasDoMes(diasDeFeriasDetectados)
       );
       if (feriasManualTexto === null) return;
-      diasDeFeriasRegistrados = parsearDiasDoMes(feriasManualTexto, ultimoDiaMes) || [];
+      diasDeFerias = parsearDiasDoMes(feriasManualTexto, ultimoDiaMes) || [];
     }
+  } else {
+    const feriasManualTexto = prompt(
+      "Dias de férias no mês, ex: 10-20. Deixe em branco se não houver:",
+      ""
+    );
+    if (feriasManualTexto === null) return;
+    diasDeFerias = parsearDiasDoMes(feriasManualTexto, ultimoDiaMes) || [];
   }
-  const diasDeFeriasRegistradosSet = new Set(diasDeFeriasRegistrados);
+  const diasFerias = diasDeFerias.length;
 
-  // Get additional vacation days not yet shown in the apuração (e.g. future
-  // vacation SECAF hasn't registered yet), as a "print pages" style day
-  // spec (e.g. "22,23,24-26"). Exact days let us cross-reference holidays
-  // precisely instead of relying on a bare count.
-  const diasFeriasExtrasTexto = prompt(
-    `Dias de férias ADICIONAIS no mês, ainda não registrados no SECAF (números do dia, ex: 22,23,24-26). Deixe em branco se não houver:`,
-    ""
-  );
-  if (diasFeriasExtrasTexto === null) return;
-  // Ignore any typed day that's already registered, so overlaps don't get
-  // counted twice toward diasFerias
-  const diasDeFeriasExtras = (parsearDiasDoMes(diasFeriasExtrasTexto, ultimoDiaMes) || [])
-    .filter((dia) => !diasDeFeriasRegistradosSet.has(dia));
-  const diasFeriasExtras = diasDeFeriasExtras.length;
-  const diasFerias = diasDeFeriasRegistrados.length + diasFeriasExtras;
-
-  // Calculate holidays. diasUteis does not net out vacation days, so
-  // diasSegundaASexta - diasUteis is the total holiday count for the month,
-  // including holidays that fall inside vacation (split out below).
+  // Confirm the holiday/ponto facultativo days read from the sidebar,
+  // same pattern as vacation above: show what was found (summarized as
+  // ranges) and let the user correct the full list with the day-spec
+  // format if the page's list is wrong or doesn't match this month. A day
+  // can be marked as half-day with a trailing "p" (e.g. "24p") for pontos
+  // facultativos not caught by the automatic "após as X horas" detection.
+  // diasSegundaASexta - diasUteis is shown only as a sanity-check hint,
+  // since diasUteis doesn't net out vacation days and is otherwise an
+  // independent number from the page's holiday list.
   const feriadosCalculados = diasSegundaASexta - diasUteis;
-  const usarFeriadosCalculados = confirm(
-    `Foram detectados ${feriadosCalculados} dias de feriados/pontos facultativos.\nDeseja usar este valor calculado automaticamente?\nClique em OK para usar o valor calculado ou em Cancelar para informar manualmente.`
-  );
-
-  // diasDeTodosFeriados holds the exact days used for the vacation-overlap
-  // split below. When the count is auto-detected, that's whatever the page
-  // listed (diasFeriados); when overridden manually, the user provides the
-  // days directly (same "print pages" format as vacation) so the split
-  // stays consistent with whatever they typed instead of silently reusing
-  // the scraped list.
   let diasDeTodosFeriados = diasFeriados;
-  if (!usarFeriadosCalculados) {
+  if (diasFeriados.length > 0) {
+    const usarFeriadosDetectados = confirm(
+      `Foram detectados os seguintes feriados/pontos facultativos: ${formatarDiasDeFeriados(diasFeriados, diasFeriadosParciais)} (esperado pelo dias úteis: ${feriadosCalculados}).\nDeseja usar estes dias?\nClique em OK para usar os dias detectados ou em Cancelar para informar manualmente.`
+    );
+    if (!usarFeriadosDetectados) {
+      const feriadosManualTexto = prompt(
+        `Dias (números) de feriados e pontos facultativos no mês. Marque meio período com "p", ex: 8,24p,25,31 (esperado: ${feriadosCalculados}):`,
+        formatarDiasDeFeriados(diasFeriados, diasFeriadosParciais)
+      );
+      if (feriadosManualTexto === null) return;
+      const resultado = parsearDiasDeFeriados(feriadosManualTexto, ultimoDiaMes);
+      diasDeTodosFeriados = resultado.dias.filter((dia) => ehDiaUtil(ano, mes, dia));
+      diasFeriadosParciais = resultado.diasParciais;
+    }
+  } else {
     const feriadosManualTexto = prompt(
-      `Dias (números) de feriados e pontos facultativos no mês, ex: 8,24,25,31 (esperado: ${feriadosCalculados}):`,
-      formatarDiasDoMes(diasFeriados)
+      `Dias (números) de feriados e pontos facultativos no mês. Marque meio período com "p", ex: 8,24p,25,31 (esperado: ${feriadosCalculados}):`,
+      ""
     );
     if (feriadosManualTexto === null) return;
-    diasDeTodosFeriados = parsearDiasDoMes(feriadosManualTexto, ultimoDiaMes) || [];
+    const resultado = parsearDiasDeFeriados(feriadosManualTexto, ultimoDiaMes);
+    diasDeTodosFeriados = resultado.dias.filter((dia) => ehDiaUtil(ano, mes, dia));
+    diasFeriadosParciais = resultado.diasParciais;
   }
   const feriadosEFacultativos = diasDeTodosFeriados.length;
 
-  // Split holidays into those inside vs. outside vacation (both already
-  // registered in SECAF and the extra days just entered). Only holidays
+  // Split holidays into those inside vs. outside vacation. Only holidays
   // outside vacation reduce the hours owed for presence: a holiday inside
   // vacation lands on a day that (1 - diasFerias/ultimoDiaMes) already
   // excludes from the requirement, so counting it again would double-discount.
-  const todosOsDiasDeFerias = new Set([...diasDeFeriasRegistrados, ...diasDeFeriasExtras]);
-  const diasDeFeriadosForaFerias = diasDeTodosFeriados.filter((dia) => !todosOsDiasDeFerias.has(dia));
+  const diasDeFeriasSet = new Set(diasDeFerias);
+  const diasDeFeriadosForaFerias = diasDeTodosFeriados.filter((dia) => !diasDeFeriasSet.has(dia));
 
   // Afternoon-only pontos facultativos only free up half the working day,
-  // even though SECAF's diasUteis credits them as a full day off
+  // even though SECAF's diasUteis credits them as a full day off. This
+  // detail is only known for days that came from the scraped list, so a
+  // manually-typed day is always treated as a full day off.
   const feriadosParciaisForaFerias = diasDeFeriadosForaFerias.filter((dia) => diasFeriadosParciais.has(dia)).length;
   const feriadosIntegraisForaFerias = diasDeFeriadosForaFerias.length - feriadosParciaisForaFerias;
 
-  // Calculate required hours
   const horasDevidasMes0 = horasPresencial * (1 - diasFerias / ultimoDiaMes)
     - feriadosIntegraisForaFerias * 8 - feriadosParciaisForaFerias * 4;
   const horasDevidasMes = Math.max(horasDevidasMes0, 0);
@@ -232,7 +245,7 @@ function secaf() {
     const dateObject = new Date(ano, mes - 1, dayOfMonth);
     const ehFimDeSemana = dateObject.getDay() === 0 || dateObject.getDay() === 6;
     const ehFeriado = diasFeriadosSet.has(dayOfMonth);
-    const ehFerias = todosOsDiasDeFerias.has(dayOfMonth);
+    const ehFerias = diasDeFeriasSet.has(dayOfMonth);
     if (!ehFimDeSemana && !ehFeriado && !ehFerias) {
       remainingWorkdays++;
     }
@@ -255,14 +268,14 @@ function secaf() {
       <tr style="background-color: #f2f2f2;">
         <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Feriados e pontos facultativos</td>
         <td style="padding: 8px; border: 1px solid #ddd;">
-          ${feriadosEFacultativos}
-          ${diasDeFeriadosForaFerias.length < feriadosEFacultativos ? ` (${feriadosEFacultativos - diasDeFeriadosForaFerias.length} durante as férias)` : ''}
-          ${feriadosParciaisForaFerias > 0 ? ` — ${feriadosIntegraisForaFerias} integral(is) + ${feriadosParciaisForaFerias} parcial(is) descontado(s)` : ''}
+          ${feriadosEFacultativos}${feriadosEFacultativos > 0 ? ` (${formatarDiasDoMes(diasDeTodosFeriados)})` : ''}
+          ${diasDeFeriadosForaFerias.length < feriadosEFacultativos ? ` — ${feriadosEFacultativos - diasDeFeriadosForaFerias.length} durante as férias` : ''}
+          ${feriadosParciaisForaFerias > 0 ? `, ${feriadosIntegraisForaFerias} integral(is) + ${feriadosParciaisForaFerias} parcial(is) descontado(s)` : ''}
         </td>
       </tr>
       <tr>
         <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Dias de férias</td>
-        <td style="padding: 8px; border: 1px solid #ddd;">${diasFerias}</td>
+        <td style="padding: 8px; border: 1px solid #ddd;">${diasFerias}${diasFerias > 0 ? ` (${formatarDiasDoMes(diasDeFerias)})` : ''}</td>
       </tr>
       <tr style="background-color: #f2f2f2;">
         <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Horas presenciais devidas</td>
@@ -331,6 +344,13 @@ function secaf() {
   document.body.appendChild(modal);
 }
 
+// Helper function to check whether a given day-of-month is a weekday
+// (Mon-Fri) in the given ano/mes.
+function ehDiaUtil(ano, mes, dia) {
+  const diaSemana = new Date(ano, mes - 1, dia).getDay();
+  return diaSemana >= 1 && diaSemana <= 5;
+}
+
 // Helper function to parse a "print pages" style day spec, e.g. "1,3,5-9",
 // into a sorted array of unique day numbers. Returns null if nothing valid
 // was found (blank input, garbage input).
@@ -357,10 +377,29 @@ function parsearDiasDoMes(texto, ultimoDiaMes) {
   return dias.size > 0 ? Array.from(dias).sort((a, b) => a - b) : null;
 }
 
-// Helper function to render a sorted array of day numbers back into
-// "print pages" style text (e.g. [1,2,3,5] -> "1-3,5"), for prefilling
-// a prompt that parsearDiasDoMes will read back.
-function formatarDiasDoMes(dias) {
+// Helper function to parse a holiday day spec that also allows marking a
+// single day as a half-day ponto facultativo with a trailing "p", e.g.
+// "8,24p,25,31". Ranges (e.g. "10-15") are always treated as full days —
+// only single-day entries can carry the "p" marker. Returns
+// { dias, diasParciais } where dias is the full sorted day list
+// (parsearDiasDoMes semantics) and diasParciais is the subset marked "p".
+function parsearDiasDeFeriados(texto, ultimoDiaMes) {
+  const diasParciais = new Set();
+  const textoSemMarcadores = texto.replace(/(\d{1,2})\s*p\b/gi, (match, dia) => {
+    const diaNum = parseInt(dia);
+    if (diaNum >= 1 && diaNum <= ultimoDiaMes) diasParciais.add(diaNum);
+    return dia;
+  });
+  const dias = parsearDiasDoMes(textoSemMarcadores, ultimoDiaMes);
+  return { dias: dias || [], diasParciais };
+}
+
+// Helper function to render an array of day numbers back into "print
+// pages" style text (e.g. [1,2,3,5] -> "1-3,5"), for prefilling a prompt
+// that parsearDiasDoMes will read back. Sorts and dedupes defensively,
+// since callers may pass an unsorted, DOM-scraped array.
+function formatarDiasDoMes(diasEntrada) {
+  const dias = Array.from(new Set(diasEntrada)).sort((a, b) => a - b);
   if (dias.length === 0) return "";
   const partes = [];
   let inicio = dias[0];
@@ -376,6 +415,16 @@ function formatarDiasDoMes(dias) {
     anterior = atual;
   }
   return partes.join(",");
+}
+
+// Helper function to render days back into the parsearDiasDeFeriados format:
+// full days collapsed into ranges, partial days listed individually with
+// a trailing "p" (since ranges can't carry the marker).
+function formatarDiasDeFeriados(dias, diasParciais) {
+  const diasIntegrais = dias.filter((dia) => !diasParciais.has(dia));
+  const partesIntegrais = formatarDiasDoMes(diasIntegrais);
+  const partesParciais = dias.filter((dia) => diasParciais.has(dia)).map((dia) => `${dia}p`);
+  return [partesIntegrais, ...partesParciais].filter((parte) => parte !== "").join(",");
 }
 
 // Helper function to calculate weekdays in month
