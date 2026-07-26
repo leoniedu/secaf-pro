@@ -2,9 +2,9 @@
 // Converted from bookmarklet to Chrome extension format
 
 function secaf() {
-  // Check if we're on the SECAF system
-  if (!document.querySelector("#SideNav")) {
-    alert("Esta página não parece ser do sistema SECAF. Execute esta extensão na página do SECAF.");
+  // Check if we're on the SECAF system (background.js already probes for this;
+  // kept as a silent safety net)
+  if (!document.querySelector('img[alt="Logotipo SECAF"]')) {
     return;
   }
 
@@ -31,13 +31,12 @@ function secaf() {
   const diasUteis = parseInt(elementoDiasUteis.textContent.trim());
 
   // Get required hours
-  const horasPresencial = prompt("Número de horas presenciais obrigatórias por mês:", "64");
+  const horasPresencial = pedirNumero("Número de horas presenciais obrigatórias por mês:", "64");
   if (horasPresencial === null) return;
 
   // Get vacation days
-  const diasFerias = prompt("Número de dias de férias no mês:", "0");
+  const diasFerias = pedirNumero("Número de dias de férias no mês:", "0");
   if (diasFerias === null) return;
-
 
   // Calculate holidays
   let feriadosEFacultativos = diasSegundaASexta - diasUteis;
@@ -46,14 +45,22 @@ function secaf() {
   );
 
   if (!usarFeriadosCalculados) {
-    const feriadosManual = prompt("Número de feriados e pontos facultativos no mês:", feriadosEFacultativos.toString());
+    const feriadosManual = pedirNumero("Número de feriados e pontos facultativos no mês:", feriadosEFacultativos.toString());
     if (feriadosManual === null) return;
-    feriadosEFacultativos = parseInt(feriadosManual);
+    feriadosEFacultativos = feriadosManual;
   }
+
+  // Ask how many holidays fell inside the vacation period to avoid double deduction
+  let feriadosNasFerias = 0;
+  if (diasFerias > 0 && feriadosEFacultativos > 0) {
+    feriadosNasFerias = pedirNumero("Quantos feriados/pontos facultativos caíram dentro das férias?", "0");
+    if (feriadosNasFerias === null) return;
+  }
+  const feriadosForaFerias = feriadosEFacultativos - feriadosNasFerias;
 
   // Calculate required hours
   const ultimoDiaMes = new Date(ano, mes, 0).getDate();
-  const horasDevidasMes0 = parseFloat(horasPresencial) * (1 - parseInt(diasFerias) / ultimoDiaMes) - feriadosEFacultativos * 8;
+  const horasDevidasMes0 = horasPresencial * (1 - diasFerias / ultimoDiaMes) - feriadosForaFerias * 8;
   const horasDevidasMes = Math.max(horasDevidasMes0, 0);
 
   // Get worked hours from table
@@ -65,43 +72,34 @@ function secaf() {
     const linhas = tabelaApuracao.querySelectorAll("tr");
     console.log(`Encontradas ${linhas.length} linhas na tabela`);
 
-    // Check current date
+    // Find the row matching the current date, wherever it is in the table
     const dataAtual = new Date();
     const diaAtual = String(dataAtual.getDate()).padStart(2, '0');
     const mesAtual = dataAtual.getMonth() + 1;
-    const anoAtual = dataAtual.getFullYear();
-    const dataAtualStr = `${diaAtual}/${mesAtual}/${anoAtual}`;
-    console.log(`Data atual: ${dataAtualStr}`);
+    const mesesAbrev = {
+      1: "JAN", 2: "FEV", 3: "MAR", 4: "ABR", 5: "MAI", 6: "JUN",
+      7: "JUL", 8: "AGO", 9: "SET", 10: "OUT", 11: "NOV", 12: "DEZ"
+    };
+    const regexHoje = new RegExp(`${diaAtual}${mesesAbrev[mesAtual]}`, 'i');
 
-    // Check if first row is current date
-    const primeiraLinhaDataElemento = tabelaApuracao.querySelector("div > section > table > tbody > tr:nth-child(1) > th");
-    let pularPrimeiraLinha = false;
-
-    if (primeiraLinhaDataElemento) {
-      const textoData = primeiraLinhaDataElemento.textContent.trim();
-      console.log(`Data da primeira linha: "${textoData}"`);
-
-      const mesesAbrev = {
-        1: "JAN", 2: "FEV", 3: "MAR", 4: "ABR", 5: "MAI", 6: "JUN",
-        7: "JUL", 8: "AGO", 9: "SET", 10: "OUT", 11: "NOV", 12: "DEZ"
-      };
-      const mesAbrev = mesesAbrev[mesAtual];
-      const formatoPortugues = new RegExp(`${diaAtual}${mesAbrev}`, 'i');
-
-      if (formatoPortugues.test(textoData)) {
-        const incluir_data_de_hoje = confirm("Incluir a data de hoje?");
-        if (!incluir_data_de_hoje) {
-          console.log("Pulando data de hoje.");
-          pularPrimeiraLinha = true;
-        }
+    let linhaHoje = null;
+    for (const linha of linhas) {
+      const celulaData = linha.querySelector("th");
+      if (celulaData && regexHoje.test(celulaData.textContent.trim())) {
+        linhaHoje = linha;
+        break;
       }
+    }
+
+    let pularHoje = false;
+    if (linhaHoje) {
+      pularHoje = !confirm("Incluir a data de hoje?");
     }
 
     // Process each row
     linhas.forEach((linha, indice) => {
-      // Skip first data row if it matches current date
-      if (indice === 1 && pularPrimeiraLinha) {
-        console.log("Pulando a primeira linha por corresponder à data atual.");
+      if (pularHoje && linha === linhaHoje) {
+        console.log("Pulando a linha da data atual.");
         return;
       }
 
@@ -138,21 +136,26 @@ function secaf() {
   // Calculate hour balance
   const saldoHoras = horasDevidasMes - horasTrabalhadasMes;
 
-  // Calculate remaining weekdays in month (excluding holidays)
-  const todayDate = new Date();
-  const currentYearValue = todayDate.getFullYear();
-  const currentMonthValue = todayDate.getMonth();
-  const lastDayOfMonth = new Date(currentYearValue, currentMonthValue + 1, 0).getDate();
-  let remainingWorkdays = 0;
+  // Calculate remaining weekdays in the viewed month (excluding holidays)
+  const hoje = new Date();
+  let primeiroDiaRestante;
+  if (ano === hoje.getFullYear() && mes === hoje.getMonth() + 1) {
+    primeiroDiaRestante = hoje.getDate();
+  } else if (new Date(ano, mes - 1, 1) > hoje) {
+    primeiroDiaRestante = 1; // future month: all weekdays remain
+  } else {
+    primeiroDiaRestante = ultimoDiaMes + 1; // past month: none remain
+  }
 
-  for (let dayOfMonth = todayDate.getDate(); dayOfMonth <= lastDayOfMonth; dayOfMonth++) {
-    const dateObject = new Date(currentYearValue, currentMonthValue, dayOfMonth);
+  let remainingWorkdays = 0;
+  for (let dayOfMonth = primeiroDiaRestante; dayOfMonth <= ultimoDiaMes; dayOfMonth++) {
+    const dateObject = new Date(ano, mes - 1, dayOfMonth);
     if (dateObject.getDay() !== 0 && dateObject.getDay() !== 6) { // Skip weekends
       remainingWorkdays++;
     }
   }
 
-  const saldoHorasDia = saldoHoras > 0 ? saldoHoras / remainingWorkdays : 0;
+  const saldoHorasDia = saldoHoras > 0 && remainingWorkdays > 0 ? saldoHoras / remainingWorkdays : 0;
 
   // Create results HTML
   const htmlResultado = `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 20px auto; padding: 20px; border: 1px solid #ccc; border-radius: 5px; background-color: #f9f9f9;">
@@ -172,7 +175,7 @@ function secaf() {
       </tr>
       <tr style="background-color: #f2f2f2;">
         <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Feriados e pontos facultativos</td>
-        <td style="padding: 8px; border: 1px solid #ddd;">${feriadosEFacultativos}</td>
+        <td style="padding: 8px; border: 1px solid #ddd;">${feriadosEFacultativos}${feriadosNasFerias > 0 ? ` (${feriadosNasFerias} durante as férias)` : ''}</td>
       </tr>
       <tr>
         <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Dias de férias</td>
@@ -192,7 +195,7 @@ function secaf() {
           ${formatarHorasMinutos(Math.abs(saldoHoras))} ${saldoHoras > 0 ? '(faltam horas)' : '(horas excedentes)'}
         </td>
       </tr>
-      ${saldoHoras > 0 ? `
+      ${saldoHoras > 0 && remainingWorkdays > 0 ? `
       <tr style="background-color: #f0f8ff; font-weight: bold;">
         <td style="padding: 8px; border: 1px solid #ddd;">Saldo diário (${remainingWorkdays} dias úteis restantes*)</td>
         <td style="padding: 8px; border: 1px solid #ddd; color: ${saldoHorasDia > 0 ? 'red' : 'green'};">
@@ -207,8 +210,12 @@ function secaf() {
     </p>
   </div>`;
 
-  // Create modal
+  // Create modal (replacing any previous one)
+  const modalAnterior = document.getElementById('secaf-helper-modal');
+  if (modalAnterior) modalAnterior.remove();
+
   const modal = document.createElement('div');
+  modal.id = 'secaf-helper-modal';
   modal.style.position = 'fixed';
   modal.style.top = '0';
   modal.style.left = '0';
@@ -257,20 +264,15 @@ function calcularDiasSegundaASexta(ano, mes) {
   return contador;
 }
 
-// Helper function to count workdays passed in month
-function contarDiasUteisPassados(ano, mes) {
-  const hoje = new Date();
-  const ultimoDia = new Date(ano, mes, 0).getDate();
-  let diasUteisPassados = 0;
-
-  for (let dia = 1; dia <= hoje.getDate(); dia++) {
-    const data = new Date(ano, mes - 1, dia);
-    if (data.getDay() !== 0 && data.getDay() !== 6) { // Skip weekends
-      diasUteisPassados++;
-    }
+// Helper function to prompt for a non-negative number, re-asking until valid
+function pedirNumero(mensagem, padrao) {
+  while (true) {
+    const resposta = prompt(mensagem, padrao);
+    if (resposta === null) return null;
+    const numero = parseFloat(resposta.trim().replace(",", "."));
+    if (!isNaN(numero) && numero >= 0) return numero;
+    alert("Valor inválido. Informe um número maior ou igual a zero.");
   }
-
-  return diasUteisPassados;
 }
 
 // Helper function to format year/month
@@ -283,8 +285,9 @@ function formatarMes(anoMes) {
 
 // Helper function to format decimal hours as hours and minutes
 function formatarHorasMinutos(horasDecimais) {
-  const horas = Math.floor(horasDecimais);
-  const minutos = Math.round((horasDecimais - horas) * 60);
+  const totalMinutos = Math.round(horasDecimais * 60);
+  const horas = Math.floor(totalMinutos / 60);
+  const minutos = totalMinutos % 60;
   return `${horas}h${minutos.toString().padStart(2, '0')}min`;
 }
 
