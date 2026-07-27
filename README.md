@@ -9,7 +9,7 @@ Para instalar a extensão, siga estes passos:
 1. Abra o Chrome e navegue para `chrome://extensions/`
 2. Ative o "Modo do desenvolvedor" no canto superior direito
 3. Clique em "Carregar sem compactação"
-4. Selecione a pasta `secaf-helper` que contém os arquivos da extensão
+4. Selecione a pasta `secaf-pro` que contém os arquivos da extensão
 5. A extensão será instalada e aparecerá na barra de ferramentas do Chrome
 
 ## Uso

@@ -12,7 +12,7 @@ Tudo que você precisa para publicar o SECAF-PRO na Chrome Web Store, com os tex
 Inclua apenas os arquivos da extensão — nada de `.git`, `githooks/`, `docs/` etc.:
 
 ```sh
-cd /Users/eleon/github/secaf-helper
+cd /Users/eleon/github/secaf-pro
 zip -r secaf-pro.zip manifest.json background.js secaf_helper.js error.html images -x "*.DS_Store"
 ```
 
